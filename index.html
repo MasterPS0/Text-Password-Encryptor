@@ -1,1 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Text Password Encryptor</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #111827, #1f2937);
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      width: 100%;
+      max-width: 850px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    }
+    h1 { margin: 0 0 8px; text-align: center; }
+    .subtitle { text-align: center; color: #94a3b8; margin-bottom: 22px; }
+    label { display: block; margin: 14px 0 8px; font-weight: bold; }
+    textarea, input {
+      width: 100%;
+      border: 1px solid #475569;
+      background: #020617;
+      color: #e5e7eb;
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 15px;
+      outline: none;
+    }
+    textarea { min-height: 150px; resize: vertical; }
+    input:focus, textarea:focus { border-color: #38bdf8; }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 13px 16px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 15px;
+    }
+    .encrypt { background: #22c55e; color: #052e16; }
+    .decrypt { background: #38bdf8; color: #082f49; }
+    .copy { background: #f59e0b; color: #451a03; }
+    .clear { background: #ef4444; color: #450a0a; }
+    .save { background: #a78bfa; color: #2e1065; }
+    .status {
+      margin-top: 14px;
+      color: #cbd5e1;
+      min-height: 22px;
+      text-align: center;
+    }
+    .note {
+      margin-top: 18px;
+      padding: 12px;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      color: #94a3b8;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    @media (max-width: 650px) {
+      .row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Text Password Encryptor</h1>
+    <div class="subtitle">Encrypt and decrypt text using a password</div>
 
+    <label for="password">Password</label>
+    <input id="password" type="password" placeholder="Enter password" />
+
+    <label for="inputText">Input Text</label>
+    <textarea id="inputText" placeholder="Enter text to encrypt or encrypted text to decrypt"></textarea>
+
+    <div class="row">
+      <button class="encrypt" onclick="encryptText()">Encrypt Text</button>
+      <button class="decrypt" onclick="decryptText()">Decrypt Text</button>
+    </div>
+
+    <label for="outputText">Output</label>
+    <textarea id="outputText" readonly placeholder="Result will appear here"></textarea>
+
+    <div class="row">
+      <button class="copy" onclick="copyOutput()">Copy Output</button>
+      <button class="save" onclick="saveOutput()">Save Output</button>
+      <button class="clear" onclick="clearAll()">Clear</button>
+      <button onclick="swapText()">Move Output to Input</button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div class="note">
+      This page works offline in your browser. It uses AES-GCM with PBKDF2. Keep your password safe; without it, the encrypted text cannot be decrypted.
+    </div>
+  </div>
+
+<script>
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  bytes.forEach(b => binary += String.fromCharCode(b));
+  return btoa(binary);
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function getKey(password, salt) {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: salt,
+      iterations: 150000,
+      hash: "SHA-256"
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptText() {
+  const password = document.getElementById("password").value;
+  const text = document.getElementById("inputText").value;
+
+  if (!password) return setStatus("Please enter a password.");
+  if (!text) return setStatus("Please enter text to encrypt.");
+
+  try {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await getKey(password, salt);
+
+    const encrypted = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: iv },
+      key,
+      enc.encode(text)
+    );
+
+    const payload = {
+      v: 1,
+      alg: "AES-GCM",
+      kdf: "PBKDF2-SHA256",
+      iterations: 150000,
+      salt: bytesToBase64(salt),
+      iv: bytesToBase64(iv),
+      data: bytesToBase64(new Uint8Array(encrypted))
+    };
+
+    document.getElementById("outputText").value = btoa(JSON.stringify(payload));
+    setStatus("Encrypted successfully.");
+  } catch (e) {
+    setStatus("Encryption failed: " + e.message);
+  }
+}
+
+async function decryptText() {
+  const password = document.getElementById("password").value;
+  const text = document.getElementById("inputText").value.trim();
+
+  if (!password) return setStatus("Please enter a password.");
+  if (!text) return setStatus("Please enter encrypted text to decrypt.");
+
+  try {
+    const payload = JSON.parse(atob(text));
+    const salt = base64ToBytes(payload.salt);
+    const iv = base64ToBytes(payload.iv);
+    const encrypted = base64ToBytes(payload.data);
+    const key = await getKey(password, salt);
+
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: iv },
+      key,
+      encrypted
+    );
+
+    document.getElementById("outputText").value = dec.decode(decrypted);
+    setStatus("Decrypted successfully.");
+  } catch (e) {
+    setStatus("Decryption failed. Wrong password or invalid encrypted text.");
+  }
+}
+
+function copyOutput() {
+  const output = document.getElementById("outputText").value;
+  if (!output) return setStatus("No output to copy.");
+  navigator.clipboard.writeText(output);
+  setStatus("Output copied.");
+}
+
+function saveOutput() {
+  const output = document.getElementById("outputText").value;
+  if (!output) return setStatus("No output to save.");
+  const blob = new Blob([output], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "output.txt";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  setStatus("Output saved.");
+}
+
+function swapText() {
+  const output = document.getElementById("outputText").value;
+  if (!output) return setStatus("No output to move.");
+  document.getElementById("inputText").value = output;
+  document.getElementById("outputText").value = "";
+  setStatus("Output moved to input.");
+}
+
+function clearAll() {
+  document.getElementById("inputText").value = "";
+  document.getElementById("outputText").value = "";
+  setStatus("Cleared.");
+}
+
+function setStatus(msg) {
+  document.getElementById("status").textContent = msg;
+}
+</script>
+</body>
+</html>
